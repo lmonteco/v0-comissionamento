@@ -1,0 +1,246 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Users and authentication
+model User {
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  password       String?
+  role           String   @default("user") // admin, user
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  salesperson    Salesperson?
+}
+
+// Salespeople
+model Salesperson {
+  id             String   @id @default(cuid())
+  code           String   @unique // V001, V002, etc. - Must be unique and match GPS
+  name           String   // Auto-filled from GPS based on code
+  is_commissioned Boolean  @default(true)
+  user_id        String?  @unique
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user           User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  sales          Sale[]
+  calculations   SalespersonCalculation[]
+  quarterly_bonuses SalespersonQuarterlyBonus[]
+}
+
+// Products
+model Product {
+  id                String   @id @default(cuid())
+  description       String
+  counts_for_goal   Boolean  @default(true)
+  is_commissioned   Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  product_types     ProductType[]
+  sales             Sale[]
+  commissions       CommissionRate[]
+}
+
+// Product Types (Modalidade, Tipo de Plano, etc.)
+model ProductType {
+  id          String    @id @default(cuid())
+  product_id  String
+  type        String    // Modalidade, Tipo de Plano, Módulo de Cobertura
+  codes       String[]  // Array of codes like ["001", "002"]
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+  product     Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+}
+
+// Commission Rules
+model CommissionRule {
+  id                String    @id @default(cuid())
+  rule_id           String    // R-2025-01, R-2025-02
+  start_date        DateTime
+  end_date          DateTime?
+  is_active         Boolean   @default(true)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  goals             Goal[]
+  calculations      Calculation[]
+}
+
+// Goals
+model Goal {
+  id                String    @id @default(cuid())
+  rule_id           String
+  value             Decimal   @db.Decimal(10, 2)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  rule              CommissionRule @relation(fields: [rule_id], references: [id], onDelete: Cascade)
+  achievement_ranges AchievementRange[]
+}
+
+// Achievement Ranges (faixas de atingimento)
+model AchievementRange {
+  id                String    @id @default(cuid())
+  goal_id           String
+  min_percentage    Decimal   @db.Decimal(5, 2)
+  max_percentage    Decimal?  @db.Decimal(5, 2)
+  category          String    // Não atingida, Parcial, Meta, Superação, Excelência
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  goal              Goal      @relation(fields: [goal_id], references: [id], onDelete: Cascade)
+  commission_rates  CommissionRate[]
+}
+
+// Commission Rates
+model CommissionRate {
+  id                    String    @id @default(cuid())
+  product_id            String
+  achievement_range_id  String
+  rate                  Decimal   @db.Decimal(5, 2)
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  product               Product   @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  achievement_range     AchievementRange @relation(fields: [achievement_range_id], references: [id], onDelete: Cascade)
+}
+
+// Quarterly Bonus
+model QuarterlyBonus {
+  id                String    @id @default(cuid())
+  value             Decimal   @db.Decimal(10, 2)
+  min_percentage    Decimal   @db.Decimal(5, 2)
+  is_active         Boolean   @default(true)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  calculations      QuarterlyBonusCalculation[]
+}
+
+// Calculations
+model Calculation {
+  id                String    @id @default(cuid())
+  calculation_id    String    // AP-2025-01, AP-2025-02
+  rule_id           String
+  reference_month   Int       // Month of reference (1-12)
+  reference_year    Int       // Year of reference
+  start_date        DateTime  // Start date of the appraisal period
+  end_date          DateTime  // End date of the appraisal period
+  goal_value        Decimal   @db.Decimal(10, 2)
+  achieved_value    Decimal   @db.Decimal(10, 2)
+  achievement_percentage Decimal @db.Decimal(5, 2)
+  achievement_category  String
+  commission_total  Decimal   @db.Decimal(10, 2)
+  status            String    @default("pendente") // pendente, concluída
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  rule              CommissionRule @relation(fields: [rule_id], references: [id])
+  sales             Sale[]
+  salesperson_calculations SalespersonCalculation[]
+  product_calculations ProductCalculation[]
+}
+
+// Salesperson Calculations (individual results)
+model SalespersonCalculation {
+  id                String    @id @default(cuid())
+  calculation_id    String
+  salesperson_id    String
+  produced_value    Decimal   @db.Decimal(10, 2)
+  commission_value  Decimal   @db.Decimal(10, 2)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  calculation       Calculation @relation(fields: [calculation_id], references: [id], onDelete: Cascade)
+  salesperson       Salesperson @relation(fields: [salesperson_id], references: [id], onDelete: Cascade)
+}
+
+// Product Calculations (totals by product)
+model ProductCalculation {
+  id                String    @id @default(cuid())
+  calculation_id    String
+  product_description String
+  value             Decimal   @db.Decimal(10, 2)
+  commission_rate   Decimal   @db.Decimal(5, 2)
+  commission_value  Decimal   @db.Decimal(10, 2)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  calculation       Calculation @relation(fields: [calculation_id], references: [id], onDelete: Cascade)
+}
+
+// Quarterly Bonus Calculations
+model QuarterlyBonusCalculation {
+  id                String    @id @default(cuid())
+  bonus_id          String
+  reference_quarter Int       // Quarter (1-4)
+  reference_year    Int       // Year
+  start_date        DateTime  // Start date of the quarter
+  end_date          DateTime  // End date of the quarter
+  achieved_percentage Decimal @db.Decimal(5, 2) // Total achievement percentage for the quarter
+  is_approved       Boolean   @default(false)
+  status            String    @default("pendente") // pendente, aprovada, rejeitada
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  bonus             QuarterlyBonus @relation(fields: [bonus_id], references: [id])
+  salesperson_bonuses SalespersonQuarterlyBonus[]
+  monthly_calculations QuarterlyMonthlyCalculation[] // Add this relation
+}
+
+// Salesperson Quarterly Bonuses
+model SalespersonQuarterlyBonus {
+  id                      String    @id @default(cuid())
+  quarterly_calculation_id String
+  salesperson_id          String
+  bonus_value             Decimal   @db.Decimal(10, 2)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  quarterly_calculation   QuarterlyBonusCalculation @relation(fields: [quarterly_calculation_id], references: [id], onDelete: Cascade)
+  salesperson             Salesperson @relation(fields: [salesperson_id], references: [id], onDelete: Cascade)
+}
+
+// Sales
+model Sale {
+  id                String    @id @default(cuid())
+  salesperson_id    String
+  product_id        String
+  calculation_id    String?
+  sale_date         DateTime
+  value             Decimal   @db.Decimal(10, 2)
+  commission_rate   Decimal?  @db.Decimal(5, 2)
+  commission_value  Decimal?  @db.Decimal(10, 2)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  salesperson       Salesperson @relation(fields: [salesperson_id], references: [id], onDelete: Cascade)
+  product           Product @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  calculation       Calculation? @relation(fields: [calculation_id], references: [id])
+}
+
+// Add a new model to track monthly calculations for quarterly bonuses
+model QuarterlyMonthlyCalculation {
+  id                      String    @id @default(cuid())
+  quarterly_calculation_id String
+  month                   Int       // Month (1-12)
+  year                    Int       // Year
+  achievement_percentage  Decimal   @db.Decimal(5, 2)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  quarterly_calculation   QuarterlyBonusCalculation @relation(fields: [quarterly_calculation_id], references: [id], onDelete: Cascade)
+}
